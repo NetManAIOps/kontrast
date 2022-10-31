@@ -61,9 +61,6 @@ class Dataset:
             print('Building dataset..')
             self.data = [None] * size
             def read_csv(id: int, filename: str) -> tuple:
-                if id % 100 == 0:
-                    print(id)
-
                 df = pd.read_csv(filename)
                 values = list(df['value'])
                 q = np.percentile(values, 95)
@@ -509,12 +506,9 @@ class DataLoader:
 
         self.data = np.random.permutation(np.array(data, dtype=object))
         for i, d in enumerate(data):
-            if not d[0].shape == d[1].shape:
-                print(i)
-                print(d[0].shape, d[1].shape)
-                print(d)
-                exit(0)
+            assert d[0].shape == d[1].shape
         assert subset in ['train', 'test']
+
         self.subset = subset
         self.batch_size = batch_size
         self.cache = []
