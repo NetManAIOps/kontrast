@@ -18,6 +18,7 @@ Kontrast is a self-supervised, generic and adaptive tool for identifying erroneo
 }
 ```
 
+
 ## Dependencies
 
 python 3.9
