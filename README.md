@@ -2,6 +2,22 @@
 
 Kontrast is a self-supervised, generic and adaptive tool for identifying erroneous software changes.
 
+## Paper
+
+[Paper Download](https://netman.aiops.org/wp-content/uploads/2022/11/kontrast-paper.pdf)
+
+## Citation
+``` bibtex
+@inproceedings{wang2022identifying,
+  title = {Identifying Erroneous Software Changes through Self-Supervised Contrastive Learning on Time Series Data},
+  booktitle = {The 33rd IEEE International Symposium on Software Reliability Engineering},
+  author = {Wang, Xuanrun and Yin, Kanglin and Ouyang, Qianyu and Wen, Xidao and Zhang, Shenglin and Zhang, Wenchi and Cao, Li and Han, Jiuxue and Jin, Xing and Pei, Dan},
+  year = {2022},
+  month = nov,
+  series = {{{ISSRE}} 2022}
+}
+```
+
 ## Dependencies
 
 python 3.9
