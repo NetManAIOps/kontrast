@@ -4,6 +4,9 @@ import os
 import pandas as pd
 import torch
 import yaml
+import numpy as np
+import tqdm
+from dtw import accelerated_dtw
 
 from kontrast.config import ModelConfig
 from kontrast.model import Model
@@ -26,7 +29,24 @@ def get_time_span(origin: int, deltas: list) -> TimeSpan:
     origin = datetime.datetime.fromtimestamp(origin)
     return TimeSpan(int((origin + deltas[0]).timestamp()), int((origin + deltas[1]).timestamp()))
 
-class Experiment:
+class BaseExperiment:
+    def __init__(self):
+        self.name_stamp = io.exp_name_stamp()
+
+    def __repr__(self) -> str:
+        return f'{self.__class__.__name__}_{self.name_stamp}'
+
+    def save_yaml(self):
+        pass
+
+    def train(self):
+        pass
+
+    def test(self) -> pd.DataFrame:
+        pass
+
+
+class Experiment(BaseExperiment):
     def __init__(self,
                  omega: td,
                  period: td,
@@ -61,9 +81,9 @@ class Experiment:
             ignore:             Whether to ignore the ongoing period in LS model, default True.
             device:             Which device should this experiment be conducted on.
         """
+        super().__init__()
 
         # The list of distance names.
-        self.name_stamp = io.exp_name_stamp()
 
         self.omega = omega
         self.period = period
@@ -97,8 +117,6 @@ class Experiment:
                     input_len=int(self.omega.total_seconds() // rate)
                 )))
 
-    def __repr__(self) -> str:
-        return f'{self.__class__.__name__}_{self.name_stamp}'
 
     def save_yaml(self):
         """
@@ -157,7 +175,7 @@ class Experiment:
         return result
 
 
-class BlueGreenExperiment:
+class BlueGreenExperiment(BaseExperiment):
     def __init__(self,
                  omega: td,
                  dataset_name: str,
@@ -171,7 +189,7 @@ class BlueGreenExperiment:
                  intensity: float=0.1,
                  rate: int=15,
                  **kwargs):
-        self.name_stamp = io.exp_name_stamp()
+        super().__init__()
 
         self.omega = omega
         self.dataset_name = dataset_name
@@ -248,3 +266,72 @@ class BlueGreenExperiment:
 
         with open(filename, 'w') as fout:
             yaml.dump(attr_dict, fout)
+
+
+class DTWExperiment(BaseExperiment):
+    def __init__(self,
+                 omega: td,
+                 dataset_name: str,
+                 batch_size: int=5000,
+                 dataset_size: int=10000,
+                 ):
+        super().__init__()
+        self.dataset_name = dataset_name
+        self.omega = omega
+        self.dataset_size = dataset_size
+        self.save_yaml()
+
+        self.batch_size = batch_size
+        self.dataset = BlueGreenDataset(
+            dataset_name=self.dataset_name,
+            omega=self.omega,
+            config=DatasetConfig(
+                K=1, mode='BG',
+                batch_size=self.batch_size,
+                dataset_size=self.dataset_size
+            ),
+            intensity=0
+        )
+
+    def train(self):
+        pass
+
+    @staticmethod
+    def _dtw_dist(a: np.ndarray, b: np.ndarray) -> float:
+        manhattan_distance = lambda x, y: np.abs(x - y)
+        d, _, __, ___ = accelerated_dtw(a, b, dist=manhattan_distance)
+        l = min(len(a), len(b))
+        return d / l
+
+    def compare(self,
+                cur_values: list,
+                base_values: list) -> float:
+        assert len(cur_values) == len(base_values)
+
+        return self._dtw_dist(np.array(cur_values), np.array(base_values))
+
+    def test(self) -> pd.DataFrame:
+        dataloader = self.dataset.get_test_data_loader()
+
+        result = []
+        for batch_x1, batch_x2, batch_y, batch_id, batch_case_id, batch_case_label in dataloader:
+            batch_x1 = batch_x1.squeeze().numpy()
+            batch_x2 = batch_x2.squeeze().numpy()
+            losses = []
+            for i in tqdm.tqdm(range(len(batch_x1))):
+                losses.append(self._dtw_dist(batch_x1[i], batch_x2[i]))
+            batch_y = batch_y.numpy()
+            batch_case_id = batch_case_id.numpy()
+            batch_case_label = batch_case_label.numpy()
+            batch_id = batch_id.numpy()
+            losses = np.array(losses)[:, np.newaxis]
+
+            batch_result = np.concatenate([batch_id, batch_y, batch_case_id, batch_case_label, losses], axis=-1)
+            result.append(batch_result)
+
+        if len(result) > 0:
+            result = np.concatenate(result, axis=0)
+            result_df = pd.DataFrame(result, columns=['id', 'label', 'case_id', 'case_label', 'dist'])
+            return result_df
+        else:
+            return None

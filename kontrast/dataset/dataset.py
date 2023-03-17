@@ -680,6 +680,9 @@ class BlueGreenDataset:
 
         return self.old_data[0].loc[1, 'timestamp'] - self.old_data[0].loc[0, 'timestamp']
 
+    def fill_length(self, d: np.ndarray):
+        pass
+
     def generate_train_data(self):
         """
         Generate sufficient train data pairs with pseudo labels.
@@ -699,12 +702,15 @@ class BlueGreenDataset:
             self.train_data = []
             cands = np.arange(len(self.old_data))
 
+            expected_len = int(self.omega.total_seconds() // self.rate())
             for _ in tqdm.tqdm(range(self.config.dataset_size)):
                 idx = random.choice(cands)
                 raw_data = self.old_data[idx]
                 start = self.blue_green_span[idx].start
                 end = self.blue_green_span[idx].end
                 v1 = np.array(raw_data[(raw_data['timestamp'] >= start) & (raw_data['timestamp'] < end)]['value'])
+                while len(v1) < expected_len:
+                    v1 = np.append(v1, v1[-1])
 
                 # Negative cases
                 v2 = Dataset._add_noises(v1, self.intensity, normal=True)
@@ -721,6 +727,8 @@ class BlueGreenDataset:
                         start2 = self.blue_green_span[idx2].start
                         end2 = self.blue_green_span[idx2].end
                         v2 = np.array(raw_data2[(raw_data2['timestamp'] >= start2) & (raw_data2['timestamp'] < end2)]['value'])
+                        while len(v2) < expected_len:
+                            v2 = np.append(v2, v2[-1])
                         if np.random.rand() < 0.5:
                             v2 = Dataset._add_noises(v2, self.intensity, normal=False)
                 self.train_data.append((v1, v2, 1))

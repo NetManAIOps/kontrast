@@ -1,7 +1,8 @@
 from time import time
-from typing import Union
+import datetime
+import torch
 
-from kontrast.experiment import *
+from kontrast.experiment import BaseExperiment, BlueGreenExperiment, Experiment, DTWExperiment
 from utils.io import get_dataset
 from utils.result_analysis import generate_analysis
 from utils.paths import *
@@ -40,11 +41,13 @@ def build_experiments(config: dict) -> list:
             if 'omega' in item:
                 item['omega'] = datetime.timedelta(minutes=item['omega'])
 
-            if k == 'kontrast':
+            if k == 'bluegreen':
                 exps.append(BlueGreenExperiment(device=free_gpu, **item))
+            elif k == 'dtw':
+                exps.append(DTWExperiment(**item))
     return exps
 
-def run_experiment(dataset_name: str, experiment: Union[Experiment, BlueGreenDataset]):
+def run_experiment(dataset_name: str, experiment: BaseExperiment):
     """
     Run a experiment using a built Experiment instance.
     Args:
@@ -100,4 +103,4 @@ if __name__ == '__main__':
         run_experiment(dataset_name, exp)
         experiments.pop(0)
 
-    # generate_analysis()
+    generate_analysis()

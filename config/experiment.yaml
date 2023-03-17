@@ -2,12 +2,38 @@ common_args:
   dataset_name: bluegreen
 
 experiments:
-  kontrast:
+  bluegreen:
     - omega: 15
       mode: 'BG'
-      dataset_size: 10000
-      epoch: 50
+      dataset_size: 20000
+      epoch: 100
       batch_size: 5000
       lstm_hidden_dim: 30
       lstm_output_dim: 30
       lr: 0.001
+      intensity: 0.2
+
+    - omega: 15
+      mode: 'BG'
+      dataset_size: 20000
+      epoch: 100
+      batch_size: 5000
+      lstm_hidden_dim: 30
+      lstm_output_dim: 30
+      lr: 0.001
+      intensity: 0.3
+
+    - omega: 15
+      mode: 'BG'
+      dataset_size: 20000
+      epoch: 100
+      batch_size: 5000
+      lstm_hidden_dim: 30
+      lstm_output_dim: 30
+      lr: 0.001
+      intensity: 0.5
+
+#  dtw:
+#    - omega: 15
+#      dataset_size: 10000
+#      batch_size: 5000
