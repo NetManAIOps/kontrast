@@ -1,3 +1,5 @@
+# 0相似/正常，1不相似/异常
+import logging
 import os
 import datetime
 import random
@@ -9,6 +11,7 @@ pd.set_option('mode.chained_assignment', None)
 import tqdm
 import pickle
 import torch
+import glob
 
 from kontrast.dataset.config import DatasetConfig
 from models.time_span import TimeSpan
@@ -68,7 +71,7 @@ class Dataset:
                     values = list(np.array(values) / q)
                 values = list((np.array(values) - 0.5) * 2)
                 df['value'] = values
-                return (id, df)
+                return id, df
             executor = ThreadPoolExecutor(20)
             tasks = [executor.submit(read_csv, id, f) for id, f in enumerate(self.filepath)]
             for future in as_completed(tasks):
@@ -568,3 +571,202 @@ class DataLoader:
             self.cnt = 0
             self.data = np.random.permutation(self.data)
             raise StopIteration
+
+class BlueGreenDataset:
+    def __init__(self,
+                 dataset_name: str,
+                 omega: td,
+                 intensity: float,
+                 config: DatasetConfig):
+        """
+        Dataset preprocessing and data generating.
+        Args:
+            dataset_name:       Filename of the dataset file under "dataset/config/" (ext name excluded).
+            omega:              Inspection window size. omega in our paper. NOTE here we use TimeDelta.
+            intensity:          The noise intensity of the given dataset.
+            config:             Dataset config.
+        """
+
+        self.config = config
+        self.omega = omega
+        self.dataset_name = dataset_name
+        self.intensity = intensity
+        self.train_data = None
+        self.test_data = None
+
+        # Read the meta data of the dataset.
+        dataset_df = io.get_bluegreen_dataset(self.dataset_name)
+
+        service = list(dataset_df['service'])
+        version = list(dataset_df['version'])
+        change_start = list(dataset_df['change'])
+        change_end = list(dataset_df['end'])
+        idxs = list(dataset_df['id'])
+        old_hash = list(dataset_df['old_hash'])
+        new_hash = list(dataset_df['new_hash'])
+        self.case_id = []
+        self.case_label = []
+        self.kpi_name = []
+        self.blue_green_span = []
+        self.old_filepath =[]
+        self.new_filepath =[]
+        for idx in idxs:
+            start = change_start[idx]
+            end = change_start[idx] + int(self.omega.total_seconds())
+            if end > change_end[idx]:
+                logging.warning(f'变更部署时间短于omega: {idx}')
+                continue
+
+            old_case_list = glob.glob(os.path.join(dataset_path, self.dataset_name,
+                                                   f'{idx:03d}${service[idx]}$*${old_hash[idx]}.csv'))
+            self.old_filepath.extend(old_case_list)
+            new_case_list = glob.glob(os.path.join(dataset_path, self.dataset_name,
+                                                   f'{idx:03d}${service[idx]}$*${new_hash[idx]}.csv'))
+            self.new_filepath.extend(new_case_list)
+            if not len(old_case_list) == len(new_case_list):
+                raise Exception(f'old_case_list 和 new_case_list 长度不同: {idx}, {service[idx]}, {old_hash[idx]}, {new_hash[idx]}')
+
+            self.case_id.extend([idx] * len(old_case_list))
+            self.case_label.extend([int(version[idx] != 'dumb')] * len(old_case_list))   # dumb是正常，其他都视为异常
+            self.blue_green_span.extend([TimeSpan(start, end)] * len(old_case_list))
+
+        # Read the raw KPIs
+        data_md5 = io.get_dataset_md5(dataset_name)
+        data_cache_path = os.path.join(cache_path, f'dataset/{data_md5}.pkl')
+        os.makedirs(os.path.join(cache_path, 'dataset'), exist_ok=True)
+        if not os.path.exists(data_cache_path):
+            print('Building dataset..')
+            self.old_data = [None] * len(self.old_filepath)
+            self.new_data = [None] * len(self.new_filepath)
+
+            def read_csv(id: int, filename: str) -> tuple:
+                df = pd.read_csv(filename)
+                values = list(df['value'])
+                q = np.percentile(values, 95)
+                if q > 0:
+                    values = list(np.array(values) / q)
+                values = list((np.array(values) - 0.5) * 2)
+                df['value'] = values
+                return id, df
+
+            executor = ThreadPoolExecutor(20)
+            tasks = [executor.submit(read_csv, id, f) for id, f in enumerate(self.old_filepath)]
+            for future in as_completed(tasks):
+                id, df = future.result()
+                self.old_data[id] = df
+            tasks = [executor.submit(read_csv, id, f) for id, f in enumerate(self.new_filepath)]
+            for future in as_completed(tasks):
+                id, df = future.result()
+                self.new_data[id] = df
+            with open(data_cache_path, 'wb') as fout:
+                pickle.dump((self.old_data, self.new_data), fout)
+            print('Finish')
+
+        else:
+            print('Loading data from cache..')
+            with open(data_cache_path, 'rb') as fin:
+                self.old_data, self.new_data = pickle.load(fin)
+            print('Loaded.')
+
+        self.generate_train_data()
+        self.generate_test_data()
+
+    def rate(self):
+        """
+        Interval of two successive samples
+        Returns:
+            int
+        """
+
+        return self.old_data[0].loc[1, 'timestamp'] - self.old_data[0].loc[0, 'timestamp']
+
+    def generate_train_data(self):
+        """
+        Generate sufficient train data pairs with pseudo labels.
+        """
+
+        train_data_md5 = io.get_dataset_md5(self.dataset_name)
+        train_data_cache_path = os.path.join(cache_path, f'dataset/{train_data_md5}_train_GB_size_{self.config.dataset_size}_omega_{int(self.omega.total_seconds())}_intensity_{self.intensity}.pkl')
+        os.makedirs(os.path.join(cache_path, 'dataset'), exist_ok=True)
+
+        if os.path.exists(train_data_cache_path):
+            print('Loading train data from cache..')
+            with open(train_data_cache_path, 'rb') as fin:
+                self.train_data = pickle.load(fin)
+            print('Loaded.')
+        else:
+            print('Building train data..')
+            self.train_data = []
+            cands = np.arange(len(self.old_data))
+
+            for _ in tqdm.tqdm(range(self.config.dataset_size)):
+                idx = random.choice(cands)
+                raw_data = self.old_data[idx]
+                start = self.blue_green_span[idx].start
+                end = self.blue_green_span[idx].end
+                v1 = np.array(raw_data[(raw_data['timestamp'] >= start) & (raw_data['timestamp'] < end)]['value'])
+
+                # Negative cases
+                v2 = Dataset._add_noises(v1, self.intensity, normal=True)
+                self.train_data.append((v1, v2, 0))
+
+                # Positive cases
+                if np.random.rand() < 0.5:
+                    v2 = Dataset._add_noises(v1, self.intensity, normal=False)
+                else:
+                    v2 = None
+                    while v2 is None or Dataset._distance(v1, v2) < 0.5:
+                        idx2 = random.choice(cands)
+                        raw_data2 = self.old_data[idx2]
+                        start2 = self.blue_green_span[idx2].start
+                        end2 = self.blue_green_span[idx2].end
+                        v2 = np.array(raw_data2[(raw_data2['timestamp'] >= start2) & (raw_data2['timestamp'] < end2)]['value'])
+                        if np.random.rand() < 0.5:
+                            v2 = Dataset._add_noises(v2, self.intensity, normal=False)
+                self.train_data.append((v1, v2, 1))
+
+            with open(train_data_cache_path, 'wb') as fout:
+                pickle.dump(self.train_data, fout)
+            print('Finish.')
+
+    def generate_test_data(self):
+        test_data_md5 = io.get_dataset_md5(self.dataset_name)
+        test_data_cache_path = os.path.join(cache_path, f'dataset/{test_data_md5}_test_BG_omega_{int(self.omega.total_seconds())}.pkl')
+        os.makedirs(os.path.join(cache_path, 'dataset'), exist_ok=True)
+
+        expected_len = int(self.omega.total_seconds() // self.rate())
+        if os.path.exists(test_data_cache_path):
+            print('Loading test data from cache..')
+            with open(test_data_cache_path, 'rb') as fin:
+                self.test_data = pickle.load(fin)
+            print('Loaded.')
+        else:
+            print('Building test data..')
+            self.test_data = []
+            size = len(self.old_data)
+            for i in tqdm.tqdm(range(size)):
+                old_data = self.old_data[i]
+                new_data = self.new_data[i]
+                start = self.blue_green_span[i].start
+                end = self.blue_green_span[i].end
+                span = TimeSpan(start, end)
+                old_data = np.array(old_data[(old_data['timestamp'] >= span.start) & (old_data['timestamp'] < span.end)]['value'])
+                while len(old_data) < expected_len:
+                    old_data = np.append(old_data, old_data[-1])
+                new_data = np.array(new_data[(new_data['timestamp'] >= span.start) & (new_data['timestamp'] < span.end)]['value'])
+                while len(new_data) < expected_len:
+                    new_data = np.append(new_data, new_data[-1])
+
+                case_id = self.case_id[i]
+                case_label = self.case_label[i]
+                self.test_data.append((old_data, new_data, -1, i, case_id, case_label))
+
+            with open(test_data_cache_path, 'wb') as fout:
+                pickle.dump(self.test_data, fout)
+            print('Finish.')
+
+    def get_train_data_loader(self):
+        return DataLoader(self.train_data, self.config.batch_size, 'train')
+
+    def get_test_data_loader(self):
+        return DataLoader(self.test_data, self.config.batch_size, 'test')

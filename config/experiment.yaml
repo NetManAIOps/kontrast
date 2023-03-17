@@ -1,15 +1,13 @@
 common_args:
-  period: 1440
-  dataset_name: aiops2018
+  dataset_name: bluegreen
 
 experiments:
   kontrast:
-    - omega: 120
-      mode: 'P'
-      K: 5
-      dataset_size: 40000
-      epoch: 100
-      batch_size: 10000
+    - omega: 15
+      mode: 'BG'
+      dataset_size: 10000
+      epoch: 50
+      batch_size: 5000
       lstm_hidden_dim: 30
       lstm_output_dim: 30
       lr: 0.001

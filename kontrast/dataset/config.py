@@ -9,7 +9,7 @@ class DatasetConfig:
         Configs of dataset building.
         Args:
             K:                  Number of noise intensity levels. K in our paper.
-            mode:               "LS" or "P", indicating this dataset is for an LS model or a P model.
+            mode:               "LS", "P", "BG", indicating this dataset is for an LS model or a P model or a BlueGreen model.
             ignore:             Whether to ignore the ongoing period, default True.
             batch_size:         Batch size of the dataset.
             dataset_size:       Number of KPI time series segment pairs in the dataset to generate per label (positive/negative).
@@ -17,7 +17,7 @@ class DatasetConfig:
 
         assert K in [1, 3, 5]
         self.K = K
-        assert mode in ['LS', 'P']
+        assert mode in ['LS', 'P', 'BG']
         self.mode = mode
         self.ignore = ignore
 

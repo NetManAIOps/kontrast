@@ -27,6 +27,31 @@ def get_dataset(dataset_name: str) -> pd.DataFrame:
     df = pd.read_csv(path)
     return df
 
+
+def get_bluegreen_dataset(dataset_name: str) -> pd.DataFrame:
+    """
+    Get blue-green dataset information from the csv file.
+    Args:
+        dataset_name:   Filename of the dataset file under "dataset/config/" (ext name excluded).
+    Returns:
+        A DataFrame whose columns: [service, version, old_hash, new_hash, start, end, change]
+            service:            Name of the instance where the KPI is collected from.
+            version:            Anomaly version of the service.
+            old_hash:           The normal version hash before blue-green deployment.
+            new_hash:           The new version hash after blue-green deployment.
+            start:              The start datetime of the csv data.
+            end:                The end datetime of the csv data.
+            change:             The timepoint when blue-green deployment went on.
+    """
+
+    path = os.path.join(dataset_config_path, f'{dataset_name}.csv')
+    df = pd.read_csv(path)
+    df['start'] = df['start'].apply(lambda x: int(datetime.datetime.strptime(x, '%Y-%m-%d %H:%M:%S').timestamp()))
+    df['end'] = df['end'].apply(lambda x: int(datetime.datetime.strptime(x, '%Y-%m-%d %H:%M:%S').timestamp()))
+    df['change'] = df['change'].apply(lambda x: int(datetime.datetime.strptime(x, '%Y-%m-%d %H:%M:%S').timestamp()))
+    return df
+
+
 def exp_name_stamp() -> str:
     """
     Get a unique experiment name based on current timestamp for saving checkpoints.

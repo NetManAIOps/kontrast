@@ -8,7 +8,7 @@ import yaml
 from kontrast.config import ModelConfig
 from kontrast.model import Model
 from kontrast.dataset.config import DatasetConfig
-from kontrast.dataset.dataset import Dataset
+from kontrast.dataset.dataset import Dataset, BlueGreenDataset
 from models.time_span import TimeSpan
 from utils import io
 from utils.paths import exp_info_save_path
@@ -155,3 +155,96 @@ class Experiment:
                 else:
                     result = pd.concat([result, cate_result])
         return result
+
+
+class BlueGreenExperiment:
+    def __init__(self,
+                 omega: td,
+                 dataset_name: str,
+                 epoch: int,
+                 lstm_hidden_dim: int,
+                 lstm_output_dim: int,
+                 lr: float,
+                 from_ckpt: str=None,
+                 batch_size: int=5000,
+                 dataset_size: int=10000,
+                 intensity: float=0.1,
+                 rate: int=15,
+                 **kwargs):
+        self.name_stamp = io.exp_name_stamp()
+
+        self.omega = omega
+        self.dataset_name = dataset_name
+        self.lstm_hidden_dim = lstm_hidden_dim
+        self.lstm_output_dim = lstm_output_dim
+        self.epoch = epoch
+        self.lr = lr
+        self.intensity = intensity
+        device = kwargs['device'] if 'device' in kwargs else 'cuda:0'
+        self.dataset_size = dataset_size
+        self.from_ckpt = from_ckpt
+        self.save_yaml()
+
+        self.batch_size = batch_size
+        self.dataset = BlueGreenDataset(
+            dataset_name=self.dataset_name,
+            omega=self.omega,
+            config=DatasetConfig(
+                K=1, mode='BG',
+                batch_size=self.batch_size,
+                dataset_size=self.dataset_size
+            ),
+            intensity=self.intensity
+        )
+
+        self.model = Model(
+            config=ModelConfig(
+                input_dim=1,
+                epoch=self.epoch,
+                lstm_hidden_dim=self.lstm_hidden_dim,
+                lstm_output_dim=self.lstm_output_dim,
+                lr=self.lr,
+                device=torch.device(device),
+                input_len=int(self.omega.total_seconds() // rate)
+            ))
+
+    def __repr__(self):
+        return f'{self.__class__.__name__}_{self.name_stamp}'
+
+    def train(self):
+        """
+        Train the model.
+        """
+
+        if self.from_ckpt is None:
+            print('Start training..')
+            self.model.train(self.dataset.get_train_data_loader(), f'{self.name_stamp}')
+            print('Training complete.')
+        else:
+            print('Start loading..')
+            self.model.load(f'{self.from_ckpt}')
+            print('Loading complete.')
+
+    def test(self) -> pd.DataFrame:
+        """
+        Test the model.
+        Returns:
+            DataFrame
+        """
+
+        return self.model.test(self.dataset.get_test_data_loader())
+
+    def save_yaml(self):
+        """
+        Save experiment setup to an yaml file.
+        """
+
+        os.makedirs(exp_info_save_path, exist_ok=True)
+        filename = os.path.join(exp_info_save_path, f'{self.__repr__()}.yaml')
+
+        attr_dict = vars(self).copy()
+        attr_dict['omega'] = str(attr_dict['omega'])
+        attr_dict['type'] = type(self).__name__
+
+        with open(filename, 'w') as fout:
+            yaml.dump(attr_dict, fout)

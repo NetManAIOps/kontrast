@@ -1,6 +1,8 @@
 cache/
 result/
 ckpt/
+dataset/
+venv/
 **/.DS_Store
 **/__pycache__/
 **/.idea/
